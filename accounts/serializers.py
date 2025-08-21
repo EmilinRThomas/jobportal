@@ -3,8 +3,7 @@ from django.contrib.auth import get_user_model, authenticate
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from .utils import generate_otp, send_otp_email
-from .models import OTPVerification
-
+from .models import OTPVerification, Profile
 
 User = get_user_model()
 
@@ -28,8 +27,7 @@ class SignupSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        password = validated_data.get("password")
-        validated_data.get("confirm_password")
+        validated_data.pop("confirm_password")
 
         user = User.objects.create_user(
             email=validated_data['email'],
@@ -38,23 +36,44 @@ class SignupSerializer(serializers.Serializer):
             last_name=validated_data.get('last_name', ''),
             phone_number=validated_data.get('phone_number', ''),
             role=validated_data.get('role', ''),
-            is_active=False,
+            is_active=False,  
         )
-        
-        
-    
+
+        Profile.objects.update_or_create(
+            user=user,
+            defaults={
+                "phone_number": validated_data.get("phone_number", ""),
+                "role": validated_data.get("role", ""),
+            }
+        )
+
         otp = generate_otp()
-        print("DEBUG: Generated OTP ->", otp) 
-        from .models import OTPVerification
         OTPVerification.objects.update_or_create(user=user, defaults={"otp": otp})
-        print("DEBUG: OTP saved to DB")
-        
+
         send_otp_email(user.email, otp)
-        print("DEBUG: OTP email function called")
+
         return {"message": "User created. OTP sent to email."}
-   
- 
+
+class ProfileSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source="user.email", read_only=True)
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
+
+    class Meta:
+        model = Profile
+        fields = ("email", "first_name", "last_name", "phone_number", "role", "photo")
+        extra_kwargs = {"photo": {"required": False}}
+        read_only_fields = ("email", "first_name", "last_name")
     
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", {})
+        if "first_name" in user_data:
+            instance.user.first_name = user_data["first_name"]
+        if "last_name" in user_data:
+            instance.user.last_name = user_data["last_name"]
+        instance.user.save()
+        return super().update(instance, validated_data)
+
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
@@ -68,7 +87,6 @@ class LoginSerializer(serializers.Serializer):
 
         user = authenticate(request=self.context.get('request'), email=email, password=password)
 
-        # If you encounter failure, you might fallback to username to support older auth:
         if not user:
             user = authenticate(request=self.context.get('request'), username=email, password=password)
 
@@ -100,7 +118,6 @@ class VerifyOtpSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError({"email": "User not found."})
 
-        from .models import OTPVerification
         try:
             otp_obj = OTPVerification.objects.get(user=user)
         except OTPVerification.DoesNotExist:
@@ -119,8 +136,6 @@ class VerifyOtpSerializer(serializers.Serializer):
         user.is_active = True
         user.save()
 
-        
-        from .models import OTPVerification
         OTPVerification.objects.filter(user=user).delete()
 
         refresh = RefreshToken.for_user(user)

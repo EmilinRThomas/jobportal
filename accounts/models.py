@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from datetime import timedelta
+from django.conf import settings
+
 # Create your models here.
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -50,6 +52,7 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
 class OTPVerification(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="otps")
     otp = models.CharField(max_length=6)  # store 6-digit OTP
@@ -69,3 +72,19 @@ class OTPVerification(models.Model):
 
     def __str__(self):
         return f"OTP for {self.user.username} - {self.otp}"
+    
+class Profile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile"
+    )
+    phone_number = models.CharField(max_length=20, blank=True)
+    role = models.CharField(max_length=50, blank=True)
+    photo = models.ImageField(upload_to="profiles/", blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+       return f"Profile({getattr(self.user, 'email', self.user.pk)})" 
